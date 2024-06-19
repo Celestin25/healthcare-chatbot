@@ -1,414 +1,134 @@
-
-# Importing the libraries
-from tkinter import *
-from tkinter import messagebox                           
-import os            
+import os
+import pickle
 import webbrowser
-
 import numpy as np
 import pandas as pd
-   
+import streamlit as st
+from streamlit_option_menu import option_menu
+from sklearn.tree import _tree
+from sklearn.preprocessing import LabelEncoder
 
-class HyperlinkManager:
-      
-    def __init__(self, text):
-        self.text = text
-        self.text.tag_config("hyper", foreground="blue", underline=1)
-        self.text.tag_bind("hyper", "<Enter>", self._enter)
-        self.text.tag_bind("hyper", "<Leave>", self._leave)
-        self.text.tag_bind("hyper", "<Button-1>", self._click)
+# Load necessary models and data
+working_dir = os.path.dirname(os.path.abspath(__file__))
+heart_disease_model = pickle.load(open(f'{working_dir}/saved_models/heart_disease_model.sav', 'rb'))
 
-        self.reset()
+# Load datasets
+training_dataset = pd.read_csv(f'{working_dir}/Training.csv')
+test_dataset = pd.read_csv(f'{working_dir}/Testing.csv')
+doc_dataset = pd.read_csv(f'{working_dir}/doctors_dataset.csv', names=['Name', 'Description'])
 
-    def reset(self):
-        self.links = {}
-
-    def add(self, action):
-        # add an action to the manager.  returns tags to use in
-        # associated text widget
-        tag = "hyper-%d" % len(self.links)
-        self.links[tag] = action
-        return "hyper", tag
-
-    def _enter(self, event):
-        self.text.config(cursor="hand2")
-
-    def _leave(self, event):
-        self.text.config(cursor="")
-
-    def _click(self, event):
-        for tag in self.text.tag_names(CURRENT):
-            if tag[:6] == "hyper-":
-                self.links[tag]()
-                return
-
-# Importing the dataset
-training_dataset = pd.read_csv('Training.csv')
-test_dataset = pd.read_csv('Testing.csv')
-
-# Slicing and Dicing the dataset to separate features from predictions
+# Preprocessing
 X = training_dataset.iloc[:, 0:132].values
 Y = training_dataset.iloc[:, -1].values
-
-# Dimensionality Reduction for removing redundancies
 dimensionality_reduction = training_dataset.groupby(training_dataset['prognosis']).max()
-
-# Encoding String values to integer constants
-from sklearn.preprocessing import LabelEncoder
 labelencoder = LabelEncoder()
 y = labelencoder.fit_transform(Y)
 
-# Splitting the dataset into training set and test set
-from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.25, random_state = 0)
-
-# Implementing the Decision Tree Classifier
+# Train the classifier
 from sklearn.tree import DecisionTreeClassifier
 classifier = DecisionTreeClassifier()
-classifier.fit(X_train, y_train)
+classifier.fit(X, y)
 
-# Saving the information of columns
-cols     = training_dataset.columns
-cols     = cols[:-1]
+# Helper function for hyperlink
+def create_hyperlink(text, url):
+    return f'<a href="{url}" target="_blank">{text}</a>'
 
-# Checking the Important features
-importances = classifier.feature_importances_
-indices = np.argsort(importances)[::-1]
-features = cols
+# Streamlit setup
+st.set_page_config(page_title="Health Assistant", layout="wide", page_icon="🧑‍⚕️")
 
-# Implementing the Visual Tree
-from sklearn.tree import _tree
+with st.sidebar:
+    selected = option_menu('Disease Prediction System', ['Heart Disease Prediction', 'Health Chatbot'], menu_icon='hospital-fill', icons=['heart', 'chat'], default_index=0)
 
-# Method to simulate the working of a Chatbot by extracting and formulating questions
-def print_disease(node):
-        #print(node)
+if selected == 'Heart Disease Prediction':
+    st.title('Heart Disease Prediction using ML')
+    st.markdown("Please fill out the following details to predict the presence of heart disease.")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        age = st.number_input('Age', min_value=1, max_value=120)
+        trestbps = st.number_input('Resting Blood Pressure (mm Hg)', min_value=50, max_value=300)
+        restecg = st.selectbox('Resting Electrocardiographic Results', options=[0, 1, 2], format_func=lambda x: {0: "Normal", 1: "ST-T Wave Abnormality", 2: "Probable or Definite Left Ventricular Hypertrophy"}[x])
+        oldpeak = st.number_input('ST Depression Induced by Exercise', min_value=0.0, max_value=10.0, step=0.1)
+        ca = st.number_input('Major Vessels Colored by Flouroscopy', min_value=0, max_value=4)
+
+    with col2:
+        sex = st.selectbox('Sex', options=[0, 1], format_func=lambda x: {0: "Female", 1: "Male"}[x])
+        chol = st.number_input('Serum Cholestoral (mg/dl)', min_value=100, max_value=700)
+        thalach = st.number_input('Maximum Heart Rate Achieved', min_value=60, max_value=250)
+        slope = st.selectbox('Slope of the Peak Exercise ST Segment', options=[0, 1, 2], format_func=lambda x: {0: "Upsloping", 1: "Flat", 2: "Downsloping"})
+
+    with col3:
+        cp = st.selectbox('Chest Pain Type', options=[0, 1, 2, 3], format_func=lambda x: {0: "Typical Angina", 1: "Atypical Angina", 2: "Non-Anginal Pain", 3: "Asymptomatic"}[x])
+        fbs = st.radio('Fasting Blood Sugar > 120 mg/dl', options=[0, 1], format_func=lambda x: {0: "False", 1: "True"}[x])
+        exang = st.radio('Exercise Induced Angina', options=[0, 1], format_func=lambda x: {0: "No", 1: "Yes"}[x])
+        thal = st.selectbox('Thalassemia', options=[0, 1, 2, 3], format_func=lambda x: {0: "Normal", 1: "Fixed Defect", 2: "Reversible Defect", 3: "Other"}[x])
+
+    if st.button('Heart Disease Test Result'):
+        user_input = [age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal]
+        try:
+            heart_prediction = heart_disease_model.predict([user_input])
+            heart_diagnosis = 'The person is having heart disease' if heart_prediction[0] == 1 else 'The person does not have any heart disease'
+            st.success(heart_diagnosis)
+        except Exception as e:
+            st.error(f"Error in prediction: {e}")
+
+elif selected == 'Health Chatbot':
+    st.title('Health Chatbot for Disease Diagnosis')
+
+    def print_disease(node):
         node = node[0]
-        #print(len(node))
-        val  = node.nonzero() 
-        #print(val)
+        val = node.nonzero()
         disease = labelencoder.inverse_transform(val[0])
         return disease
-def recurse(node, depth):
-            global val,ans
-            global tree_,feature_name,symptoms_present
-            indent = "  " * depth
-            if tree_.feature[node] != _tree.TREE_UNDEFINED:
-                name = feature_name[node]
-                threshold = tree_.threshold[node]
-                yield name + " ?"
-                
-#                ans = input()
-                ans = ans.lower()
-                if ans == 'yes':
-                    val = 1
-                else:
-                    val = 0
-                if  val <= threshold:
-                    yield from recurse(tree_.children_left[node], depth + 1)
-                else:
-                    symptoms_present.append(name)
-                    yield from recurse(tree_.children_right[node], depth + 1)
+
+    def recurse(node, depth):
+        global val, ans, tree_, feature_name, symptoms_present
+        if tree_.feature[node] != _tree.TREE_UNDEFINED:
+            name = feature_name[node]
+            threshold = tree_.threshold[node]
+            yield name + " ?"
+            ans = ans.lower()
+            if ans == 'yes':
+                val = 1
             else:
-                strData=""
-                present_disease = print_disease(tree_.value[node])
-#                print( "You may have " +  present_disease )
-#                print()
-                strData="You may have :" +  str(present_disease)
-               
-                QuestionDigonosis.objRef.txtDigonosis.insert(END,str(strData)+'\n')                  
-                
-                red_cols = dimensionality_reduction.columns 
-                symptoms_given = red_cols[dimensionality_reduction.loc[present_disease].values[0].nonzero()]
-#                print("symptoms present  " + str(list(symptoms_present)))
-#                print()
-                strData="symptoms present:  " + str(list(symptoms_present))
-                QuestionDigonosis.objRef.txtDigonosis.insert(END,str(strData)+'\n')                  
-#                print("symptoms given "  +  str(list(symptoms_given)) )  
-#                print()
-                strData="symptoms given: "  +  str(list(symptoms_given))
-                QuestionDigonosis.objRef.txtDigonosis.insert(END,str(strData)+'\n')                  
-                confidence_level = (1.0*len(symptoms_present))/len(symptoms_given)
-#                print("confidence level is " + str(confidence_level))
-#                print()
-                strData="confidence level is: " + str(confidence_level)
-                QuestionDigonosis.objRef.txtDigonosis.insert(END,str(strData)+'\n')                  
-#                print('The model suggests:')
-#                print()
-                strData='The model suggests:'
-                QuestionDigonosis.objRef.txtDigonosis.insert(END,str(strData)+'\n')                  
-                row = doctors[doctors['disease'] == present_disease[0]]
-#                print('Consult ', str(row['name'].values))
-#                print()
-                strData='Consult '+ str(row['name'].values)
-                QuestionDigonosis.objRef.txtDigonosis.insert(END,str(strData)+'\n')                  
-#                print('Visit ', str(row['link'].values))
-                #print(present_disease[0])
-                hyperlink = HyperlinkManager(QuestionDigonosis.objRef.txtDigonosis)
-                strData='Visit '+ str(row['link'].values[0])
-                def click1():
-                    webbrowser.open_new(str(row['link'].values[0]))
-                QuestionDigonosis.objRef.txtDigonosis.insert(INSERT, strData, hyperlink.add(click1))
-                #QuestionDigonosis.objRef.txtDigonosis.insert(END,str(strData)+'\n')                  
-                yield strData
-        
-def tree_to_code(tree, feature_names):
-        global tree_,feature_name,symptoms_present
-        tree_ = tree.tree_
-        #print(tree_)
-        feature_name = [
-            feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
-            for i in tree_.feature
-        ]
-        #print("def tree({}):".format(", ".join(feature_names)))
-        symptoms_present = []   
-#        recurse(0, 1)
-    
-
-def execute_bot():
-#    print("Please reply with yes/Yes or no/No for the following symptoms")    
-    tree_to_code(classifier,cols)
-
-
-
-# This section of code to be run after scraping the data
-
-doc_dataset = pd.read_csv('doctors_dataset.csv', names = ['Name', 'Description'])
-
-
-diseases = dimensionality_reduction.index
-diseases = pd.DataFrame(diseases)
-
-doctors = pd.DataFrame()
-doctors['name'] = np.nan
-doctors['link'] = np.nan
-doctors['disease'] = np.nan
-
-doctors['disease'] = diseases['prognosis']
-
-
-doctors['name'] = doc_dataset['Name']
-doctors['link'] = doc_dataset['Description']
-
-record = doctors[doctors['disease'] == 'AIDS']
-record['name']
-record['link']
-
-
-
-
-# Execute the bot and see it in Action
-#execute_bot()
-
-
-class QuestionDigonosis(Frame):
-    objIter=None
-    objRef=None
-    def __init__(self,master=None):
-        master.title("Question")
-        # root.iconbitmap("")
-        master.state("z")
-#        master.minsize(700,350)
-        QuestionDigonosis.objRef=self
-        super().__init__(master=master)
-        self["bg"]="light blue"
-        self.createWidget()
-        self.iterObj=None
-
-    def createWidget(self):
-        self.lblQuestion=Label(self,text="Question",width=12,bg="bisque")
-        self.lblQuestion.grid(row=0,column=0,rowspan=4)
-
-        self.lblDigonosis = Label(self, text="Digonosis",width=12,bg="bisque")
-        self.lblDigonosis.grid(row=4, column=0,sticky="n",pady=5)
-
-        # self.varQuestion=StringVar()
-        self.txtQuestion = Text(self, width=100,height=4)
-        self.txtQuestion.grid(row=0, column=1,rowspan=4,columnspan=20)
-
-        self.varDiagonosis=StringVar()
-        self.txtDigonosis =Text(self, width=100,height=14)
-        self.txtDigonosis.grid(row=4, column=1,columnspan=20,rowspan=20,pady=5)
-
-        self.btnNo=Button(self,text="No",width=12,bg="bisque", command=self.btnNo_Click)
-        self.btnNo.grid(row=25,column=0)
-        self.btnYes = Button(self, text="Yes",width=12,bg="bisque", command=self.btnYes_Click)
-        self.btnYes.grid(row=25, column=1,columnspan=20,sticky="e")
-
-        self.btnClear = Button(self, text="Clear",width=12,bg="bisque", command=self.btnClear_Click)
-        self.btnClear.grid(row=27, column=0)
-        self.btnStart = Button(self, text="Start",width=12,bg="bisque", command=self.btnStart_Click)
-        self.btnStart.grid(row=27, column=1,columnspan=20,sticky="e")
-    def btnNo_Click(self):
-        global val,ans
-        global val,ans
-        ans='no'
-        str1=QuestionDigonosis.objIter.__next__()
-        self.txtQuestion.delete(0.0,END)
-        self.txtQuestion.insert(END,str1+"\n")
-        
-    def btnYes_Click(self):
-        global val,ans
-        ans='yes'
-        self.txtDigonosis.delete(0.0,END)
-        str1=QuestionDigonosis.objIter.__next__()
-        
-#        self.txtDigonosis.insert(END,str1+"\n")
-        
-    def btnClear_Click(self):
-        self.txtDigonosis.delete(0.0,END)
-        self.txtQuestion.delete(0.0,END)
-    def btnStart_Click(self):
-        execute_bot()
-        self.txtDigonosis.delete(0.0,END)
-        self.txtQuestion.delete(0.0,END)
-        self.txtDigonosis.insert(END,"Please Click on Yes or No for the Above symptoms in Question")                  
-        QuestionDigonosis.objIter=recurse(0, 1)
-        str1=QuestionDigonosis.objIter.__next__()
-        self.txtQuestion.insert(END,str1+"\n")
-
-
-class MainForm(Frame):
-    main_Root = None
-    def destroyPackWidget(self, parent):
-        for e in parent.pack_slaves():
-            e.destroy()
-    def __init__(self, master=None):
-        MainForm.main_Root = master
-        super().__init__(master=master)
-        master.geometry("300x250")
-        master.title("Account Login")
-        self.createWidget()
-    def createWidget(self):
-        self.lblMsg=Label(self, text="Health Care Chatbot", bg="PeachPuff2", width="300", height="2", font=("Calibri", 13))
-        self.lblMsg.pack()
-        self.btnLogin=Button(self, text="Login", height="2", width="300", command = self.lblLogin_Click)
-        self.btnLogin.pack()
-        self.btnRegister=Button(self, text="Register", height="2", width="300", command = self.btnRegister_Click)
-        self.btnRegister.pack()
-        self.lblTeam=Label(self, text="Made by:", bg="slateblue4", width = "250", height = "1", font=("Calibri", 13))
-        self.lblTeam.pack()
-        self.lblTeam1=Label(self, text="Aryan Veturekar", bg="RoyalBlue1", width = "250", height = "1", font=("Calibri", 13))
-        self.lblTeam1.pack()
-        self.lblTeam2=Label(self, text="Himanshu Singh", bg="RoyalBlue2", width = "250", height = "1", font=("Calibri", 13))
-        self.lblTeam2.pack()
-        self.lblTeam3=Label(self, text="Danish Shaikh", bg="RoyalBlue3", width = "250", height = "1", font=("Calibri", 13))
-        self.lblTeam3.pack()
-        
-    def lblLogin_Click(self):
-        self.destroyPackWidget(MainForm.main_Root)
-        frmLogin=Login(MainForm.main_Root)
-        frmLogin.pack()
-    def btnRegister_Click(self):
-        self.destroyPackWidget(MainForm.main_Root)
-        frmSignUp = SignUp(MainForm.main_Root)
-        frmSignUp.pack()
-
-
-
-        
-class Login(Frame):
-    main_Root=None
-    def destroyPackWidget(self,parent):
-        for e in parent.pack_slaves():
-            e.destroy()
-    def __init__(self, master=None):
-        Login.main_Root=master
-        super().__init__(master=master)
-        master.title("Login")
-        master.geometry("300x250")
-        self.createWidget()
-    def createWidget(self):
-        self.lblMsg=Label(self, text="Please enter details below to login",bg="blue")
-        self.lblMsg.pack()
-        self.username=Label(self, text="Username * ")
-        self.username.pack()
-        self.username_verify = StringVar()
-        self.username_login_entry = Entry(self, textvariable=self.username_verify)
-        self.username_login_entry.pack()
-        self.password=Label(self, text="Password * ")
-        self.password.pack()
-        self.password_verify = StringVar()
-        self.password_login_entry = Entry(self, textvariable=self.password_verify, show='*')
-        self.password_login_entry.pack()
-        self.btnLogin=Button(self, text="Login", width=10, height=1, command=self.btnLogin_Click)
-        self.btnLogin.pack()
-    def btnLogin_Click(self):
-        username1 = self.username_login_entry.get()
-        password1 = self.password_login_entry.get()
-        
-#        messagebox.showinfo("Failure", self.username1+":"+password1)
-        list_of_files = os.listdir()
-        if username1 in list_of_files:
-            file1 = open(username1, "r")
-            verify = file1.read().splitlines()
-            if password1 in verify:
-                messagebox.showinfo("Sucess","Login Sucessful")
-                self.destroyPackWidget(Login.main_Root)
-                frmQuestion = QuestionDigonosis(Login.main_Root)
-                frmQuestion.pack()
+                val = 0
+            if val <= threshold:
+                yield from recurse(tree_.children_left[node], depth + 1)
             else:
-                messagebox.showinfo("Failure", "Login Details are wrong try again")
+                symptoms_present.append(name)
+                yield from recurse(tree_.children_right[node], depth + 1)
         else:
-            messagebox.showinfo("Failure", "User not found try from another user\n or sign up for new user")
+            present_disease = print_disease(tree_.value[node])
+            yield "You may have: " + str(present_disease)
+            red_cols = dimensionality_reduction.columns
+            symptoms_given = red_cols[dimensionality_reduction.loc[present_disease].values[0].nonzero()]
+            yield "Symptoms present: " + str(list(symptoms_present))
+            yield "Symptoms given: " + str(list(symptoms_given))
+            confidence_level = (1.0 * len(symptoms_present)) / len(symptoms_given)
+            yield "Confidence level is: " + str(confidence_level)
+            row = doctors[doctors['disease'] == present_disease[0]]
+            yield f'Consult {str(row["name"].values)}'
+            link = str(row['link'].values[0])
+            yield f'Visit {create_hyperlink("this link", link)}'
 
+    def tree_to_code(tree, feature_names):
+        global tree_, feature_name, symptoms_present
+        tree_ = tree.tree_
+        feature_name = [feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!" for i in tree_.feature]
+        symptoms_present = []
+        return recurse(0, 1)
 
-class SignUp(Frame):
-    main_Root=None
-    print("SignUp Class")
-    def destroyPackWidget(self,parent):
-        for e in parent.pack_slaves():
-            e.destroy()
-    def __init__(self, master=None):
-        SignUp.main_Root=master
-        master.title("Register")
-        super().__init__(master=master)
-        master.title("Register")
-        master.geometry("300x250")
-        self.createWidget()
-    def createWidget(self):
-        self.lblMsg=Label(self, text="Please enter details below", bg="blue")
-        self.lblMsg.pack()
-        self.username_lable = Label(self, text="Username * ")
-        self.username_lable.pack()
-        self.username = StringVar()
-        self.username_entry = Entry(self, textvariable=self.username)
-        self.username_entry.pack()
+    def execute_bot():
+        return tree_to_code(classifier, cols)
 
-        self.password_lable = Label(self, text="Password * ")
-        self.password_lable.pack()
-        self.password = StringVar()
-        self.password_entry = Entry(self, textvariable=self.password, show='*')
-        self.password_entry.pack()
-        self.btnRegister=Button(self, text="Register", width=10, height=1, bg="blue", command=self.register_user)
-        self.btnRegister.pack()
+    if st.button('Start Chatbot'):
+        st.session_state['iter'] = execute_bot()
 
-
-    def register_user(self):
-        file = open(self.username_entry.get(), "w")
-        file.write(self.username_entry.get() + "\n")
-        file.write(self.password_entry.get())
-        file.close()
-        
-        self.destroyPackWidget(SignUp.main_Root)
-        
-        self.lblSucess=Label(root, text="Registration Success", fg="green", font=("calibri", 11))
-        self.lblSucess.pack()
-        
-        self.btnSucess=Button(root, text="Click Here to proceed", command=self.btnSucess_Click)
-        self.btnSucess.pack()
-    def btnSucess_Click(self):
-
-        self.destroyPackWidget(SignUp.main_Root)
-        frmQuestion = QuestionDigonosis(SignUp.main_Root)
-
-        frmQuestion.pack()
-
-
-
-root = Tk()
-
-frmMainForm=MainForm(root)
-frmMainForm.pack()
-root.mainloop()
-
-
+    if 'iter' in st.session_state:
+        try:
+            query = next(st.session_state['iter'])
+            ans = st.radio(query, ['yes', 'no'])
+            if st.button('Next'):
+                st.session_state['iter'] = execute_bot()
+        except StopIteration:
+            st.success("Diagnosis completed.")
